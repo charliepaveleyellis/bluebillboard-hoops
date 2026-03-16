@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Blue Billboard - AR Hoops</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    overflow: hidden;
+    background: #000;
+    touch-action: manipulation;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  #camera {
+    position: fixed; top: 0; left: 0;
+    width: 100%; height: 100%;
+    object-fit: cover;
+    z-index: 0;
+  }
+  #camera.hidden { display: none; }
+
+  .fallback-bg {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    z-index: 0;
+    background: linear-gradient(135deg, #001a33 0%, #003d7a 50%, #001a33 100%);
+  }
+  .fallback-bg.hidden { display: none; }
+
+  canvas {
+    position: fixed; top: 0; left: 0;
+    width: 100vw; height: 100vh;
+    z-index: 1;
+  }
+
+  /* HUD */
+  #hud {
+    position: fixed; top: 0; left: 0; right: 0;
+    z-index: 2;
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 14px 20px;
+    background: linear-gradient(to bottom, rgba(0,0,0,0.6), transparent);
+    color: #fff; font-weight: 700;
+  }
+  #hud.hidden { display: none; }
+  #hud .logo img { height: 24px; }
+  #hud .score { font-size: 28px; }
+  #hud .timer { font-size: 20px; color: #ff5a4d; }
+  #hud .streak { font-size: 12px; color: #ffc107; margin-top: 2px; text-align: center; }
+
+  /* Overlays */
+  .overlay {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    z-index: 10;
+    display: flex; flex-direction: column;
+    justify-content: center; align-items: center;
+    background: rgba(0, 20, 50, 0.92);
+    color: #fff; text-align: center;
+    padding: 30px;
+  }
+  .overlay.hidden { display: none; }
+  .overlay .logo-img { width: 180px; margin-bottom: 24px; }
+  .overlay h1 {
+    font-size: 30px; text-transform: uppercase;
+    letter-spacing: 3px; margin-bottom: 8px; color: #2ea3f2;
+  }
+  .overlay h2 {
+    font-size: 18px; font-weight: 400;
+    margin-bottom: 30px; color: #d9d9d9; line-height: 1.5;
+  }
+  .overlay .final-score {
+    font-size: 72px; font-weight: 900;
+    color: #297ff0; margin: 10px 0;
+  }
+  .overlay .final-label {
+    font-size: 16px; color: #d9d9d9;
+    text-transform: uppercase; letter-spacing: 2px;
+  }
+  .overlay .stats {
+    font-size: 14px; color: #2ea3f2; margin-top: 8px;
+  }
+
+  .btn {
+    display: inline-block;
+    padding: 16px 48px;
+    font-size: 18px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 2px;
+    color: #fff; background: #003d7a;
+    border: none; border-radius: 50px;
+    cursor: pointer; margin-top: 30px;
+    transition: background 0.2s;
+  }
+  .btn:active { background: #297ff0; }
+
+  .powered-by {
+    position: fixed; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: rgba(255,255,255,0.3);
+    letter-spacing: 1px; text-transform: uppercase;
+    z-index: 3; pointer-events: none;
+  }
+
+  /* Swipe hint */
+  #swipeHint {
+    position: fixed; bottom: 25%; left: 0; right: 0;
+    text-align: center; z-index: 4;
+    color: rgba(255,255,255,0.6);
+    font-size: 16px; font-weight: 600;
+    pointer-events: none;
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+  #swipeHint.hidden { display: none; }
+  @keyframes pulse {
+    0%, 100% { opacity: 0.4; transform: translateY(0); }
+    50% { opacity: 1; transform: translateY(-8px); }
+  }
+
+  /* Score popup */
+  .score-pop {
+    position: fixed; pointer-events: none; z-index: 5;
+    font-size: 30px; font-weight: 900;
+    animation: scorePop 0.8s ease-out forwards;
+  }
+  @keyframes scorePop {
+    0% { opacity: 1; transform: translateY(0) scale(1); }
+    100% { opacity: 0; transform: translateY(-80px) scale(1.5); }
+  }
+</style>
+</head>
+<body>
+
+<video id="camera" autoplay playsinline muted></video>
+<div class="fallback-bg hidden" id="fallbackBg"></div>
+<canvas id="game"></canvas>
+
+<!-- HUD -->
+<div id="hud" class="hidden">
+  <div class="logo"><img src="logo.png" alt="Blue Billboard"></div>
+  <div style="text-align:center;">
+    <div class="score" id="scoreDisplay">0</div>
+    <div class="streak" id="streakDisplay"></div>
+  </div>
+  <div class="timer" id="timerDisplay">45</div>
+</div>
+
+<div id="swipeHint" class="hidden">Swipe up to shoot!</div>
+
+<!-- Start -->
+<div class="overlay" id="startScreen">
+  <img src="logo.png" alt="Blue Billboard" class="logo-img">
+  <h1>AR Hoops</h1>
+  <h2>Swipe up to shoot the basketball!<br>Score as many hoops as you can!</h2>
+  <button class="btn" id="startBtn">Play</button>
+</div>
+
+<!-- End -->
+<div class="overlay hidden" id="endScreen">
+  <img src="logo.png" alt="Blue Billboard" class="logo-img">
+  <h1>Time's Up!</h1>
+  <div class="final-label">Score</div>
+  <div class="final-score" id="finalScore">0</div>
+  <div class="stats" id="statsDisplay"></div>
+  <button class="btn" id="restartBtn">Play Again</button>
+</div>
+
+<div class="powered-by">Powered by Blue Billboard</div>
+
+<script>
+// ─── CAMERA ───────────────────────────────────────
+var cameraEl = document.getElementById('camera');
+var fallbackBg = document.getElementById('fallbackBg');
+
+(async function() {
+  try {
+    var stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment' }, audio: false
+    });
+    cameraEl.srcObject = stream;
+  } catch(e) {
+    cameraEl.classList.add('hidden');
+    fallbackBg.classList.remove('hidden');
+  }
+})();
+
+// ─── CANVAS ───────────────────────────────────────
+var canvas = document.getElementById('game');
+var ctx = canvas.getContext('2d');
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ─── COLOURS ──────────────────────────────────────
+var NAVY = '#003d7a';
+var BLUE = '#297ff0';
+var LIGHT = '#2ea3f2';
+var RED = '#ff5a4d';
+var GOLD = '#ffc107';
+var WHITE = '#fff';
+var ORANGE = '#ff8c00';
+var BROWN = '#c45e00';
+
+// ─── CONFIG ───────────────────────────────────────
+var GAME_DURATION = 45;
+var GRAVITY = 0.35;
+var BALL_RADIUS = 22;
+
+// ─── STATE ────────────────────────────────────────
+var running = false;
+var score = 0;
+var timeLeft = GAME_DURATION;
+var streak = 0;
+var bestStreak = 0;
+var shots = 0;
+var makes = 0;
+var timerInterval;
+
+// Ball
+var ball = { x: 0, y: 0, vx: 0, vy: 0, active: false, scored: false, missed: false };
+
+// Hoop
+var hoop = { x: 0, y: 0, w: 90, rimW: 8 };
+
+// Net particles
+var netParticles = [];
+
+// Swipe tracking
+var swipeStartX = 0;
+var swipeStartY = 0;
+var swipeStartTime = 0;
+var isSwiping = false;
+
+// Trail
+var trail = [];
+
+// ─── ELEMENTS ─────────────────────────────────────
+var hud = document.getElementById('hud');
+var scoreEl = document.getElementById('scoreDisplay');
+var streakEl = document.getElementById('streakDisplay');
+var timerEl = document.getElementById('timerDisplay');
+var swipeHint = document.getElementById('swipeHint');
+var startScreen = document.getElementById('startScreen');
+var endScreen = document.getElementById('endScreen');
+var finalScoreEl = document.getElementById('finalScore');
+var statsEl = document.getElementById('statsDisplay');
+
+// ─── POSITION HOOP ───────────────────────────────
+function positionHoop() {
+  hoop.x = canvas.width / 2;
+  hoop.y = canvas.height * 0.28;
+}
+
+// ─── RESET BALL ───────────────────────────────────
+function resetBall() {
+  ball.x = canvas.width / 2;
+  ball.y = canvas.height - 100;
+  ball.vx = 0;
+  ball.vy = 0;
+  ball.active = false;
+  ball.scored = false;
+  ball.missed = false;
+  trail = [];
+}
+
+// ─── SHOOT ────────────────────────────────────────
+function shootBall(dx, dy, power) {
+  if (ball.active) return;
+
+  ball.active = true;
+  ball.scored = false;
+  ball.missed = false;
+  shots++;
+
+  // Calculate velocity to aim toward hoop area
+  var targetX = hoop.x + (dx * 0.3);
+  var distY = ball.y - hoop.y;
+
+  // Power scales with swipe speed
+  var speedFactor = Math.min(power / 300, 1.8);
+  speedFactor = Math.max(speedFactor, 0.6);
+
+  ball.vy = -distY * 0.035 * speedFactor;
+  ball.vx = dx * 0.04 * speedFactor;
+
+  // Clamp
+  ball.vy = Math.max(ball.vy, -18);
+  ball.vy = Math.min(ball.vy, -8);
+  ball.vx = Math.max(-8, Math.min(8, ball.vx));
+}
+
+// ─── SWIPE HANDLING ───────────────────────────────
+function onSwipeStart(x, y) {
+  if (!running || ball.active) return;
+  swipeStartX = x;
+  swipeStartY = y;
+  swipeStartTime = Date.now();
+  isSwiping = true;
+}
+
+function onSwipeEnd(x, y) {
+  if (!isSwiping || !running) return;
+  isSwiping = false;
+
+  var dx = x - swipeStartX;
+  var dy = y - swipeStartY;
+  var dt = Date.now() - swipeStartTime;
+
+  // Must swipe up
+  if (dy > -30) return;
+
+  var power = Math.sqrt(dx * dx + dy * dy) / (dt / 1000);
+  shootBall(dx, dy, power);
+}
+
+canvas.addEventListener('touchstart', function(e) {
+  e.preventDefault();
+  var t = e.changedTouches[0];
+  onSwipeStart(t.clientX, t.clientY);
+}, { passive: false });
+
+canvas.addEventListener('touchend', function(e) {
+  e.preventDefault();
+  var t = e.changedTouches[0];
+  onSwipeEnd(t.clientX, t.clientY);
+}, { passive: false });
+
+// Mouse fallback
+var mouseDown = false;
+canvas.addEventListener('mousedown', function(e) {
+  mouseDown = true;
+  onSwipeStart(e.clientX, e.clientY);
+});
+canvas.addEventListener('mouseup', function(e) {
+  if (!mouseDown) return;
+  mouseDown = false;
+  onSwipeEnd(e.clientX, e.clientY);
+});
+
+// ─── SCORE POPUP ──────────────────────────────────
+function showScorePop(text, color) {
+  var el = document.createElement('div');
+  el.className = 'score-pop';
+  el.textContent = text;
+  el.style.color = color;
+  el.style.left = hoop.x + 'px';
+  el.style.top = hoop.y + 'px';
+  document.body.appendChild(el);
+  setTimeout(function() { el.remove(); }, 800);
+}
+
+// ─── NET BURST ────────────────────────────────────
+function netBurst() {
+  for (var i = 0; i < 12; i++) {
+    netParticles.push({
+      x: hoop.x + (Math.random() - 0.5) * hoop.w * 0.5,
+      y: hoop.y + 15,
+      vx: (Math.random() - 0.5) * 4,
+      vy: Math.random() * 3 + 1,
+      life: 25 + Math.random() * 15,
+      size: 2 + Math.random() * 3,
+      color: i % 3 === 0 ? GOLD : (i % 3 === 1 ? LIGHT : WHITE)
+    });
+  }
+}
+
+// ─── DRAW ─────────────────────────────────────────
+
+function drawDarkOverlay() {
+  ctx.fillStyle = 'rgba(0, 15, 40, 0.25)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+
+function drawHoop() {
+  var hx = hoop.x;
+  var hy = hoop.y;
+  var hw = hoop.w;
+  var rimR = hoop.rimW;
+
+  // Backboard
+  ctx.fillStyle = 'rgba(255,255,255,0.15)';
+  ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+  ctx.lineWidth = 2;
+  var bbW = hw + 30;
+  var bbH = 65;
+  var bbX = hx - bbW / 2;
+  var bbY = hy - bbH + 10;
+  ctx.fillRect(bbX, bbY, bbW, bbH);
+  ctx.strokeRect(bbX, bbY, bbW, bbH);
+
+  // Backboard square
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(hx - 20, hy - 30, 40, 30);
+
+  // Blue Billboard branding on backboard
+  ctx.fillStyle = LIGHT;
+  ctx.font = 'bold 10px Arial';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('BLUE BILLBOARD', hx, bbY + 12);
+
+  // Rim (3D-ish ellipse)
+  ctx.strokeStyle = RED;
+  ctx.lineWidth = rimR;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(hx - hw / 2, hy);
+  ctx.lineTo(hx + hw / 2, hy);
+  ctx.stroke();
+
+  // Rim ends (circles)
+  ctx.fillStyle = RED;
+  ctx.beginPath();
+  ctx.arc(hx - hw / 2, hy, rimR / 2 + 1, 0, Math.PI * 2);
+  ctx.arc(hx + hw / 2, hy, rimR / 2 + 1, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Net lines
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+  ctx.lineWidth = 1.5;
+  var netBottom = hy + 45;
+  var netPinch = hw * 0.2;
+  for (var i = 0; i <= 6; i++) {
+    var t = i / 6;
+    var topX = hx - hw / 2 + t * hw;
+    var botX = hx - netPinch / 2 + t * netPinch;
+    ctx.beginPath();
+    ctx.moveTo(topX, hy + 4);
+    ctx.quadraticCurveTo((topX + botX) / 2, hy + 25, botX, netBottom);
+    ctx.stroke();
+  }
+  // Horizontal net lines
+  for (var row = 0; row < 3; row++) {
+    var rowT = (row + 1) / 4;
+    var rowY = hy + 4 + rowT * (netBottom - hy - 4);
+    var rowW = hw * (1 - rowT * 0.7);
+    ctx.beginPath();
+    ctx.moveTo(hx - rowW / 2, rowY);
+    ctx.lineTo(hx + rowW / 2, rowY);
+    ctx.stroke();
+  }
+}
+
+function drawBall() {
+  var bx = ball.x;
+  var by = ball.y;
+  var r = BALL_RADIUS;
+
+  // Trail
+  for (var i = 0; i < trail.length; i++) {
+    var t = trail[i];
+    var alpha = (i / trail.length) * 0.3;
+    ctx.fillStyle = 'rgba(255, 140, 0, ' + alpha + ')';
+    ctx.beginPath();
+    ctx.arc(t.x, t.y, r * (i / trail.length) * 0.8, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
+  ctx.beginPath();
+  ctx.ellipse(bx + 3, by + 3, r, r * 0.9, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Ball body
+  var grad = ctx.createRadialGradient(bx - 5, by - 5, 2, bx, by, r);
+  grad.addColorStop(0, '#ffa040');
+  grad.addColorStop(0.7, ORANGE);
+  grad.addColorStop(1, BROWN);
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(bx, by, r, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Ball outline
+  ctx.strokeStyle = '#8B4513';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Ball lines
+  ctx.strokeStyle = 'rgba(139, 69, 19, 0.5)';
+  ctx.lineWidth = 1.5;
+  // Vertical
+  ctx.beginPath();
+  ctx.moveTo(bx, by - r);
+  ctx.lineTo(bx, by + r);
+  ctx.stroke();
+  // Horizontal
+  ctx.beginPath();
+  ctx.moveTo(bx - r, by);
+  ctx.lineTo(bx + r, by);
+  ctx.stroke();
+  // Curves
+  ctx.beginPath();
+  ctx.arc(bx, by, r * 0.55, -0.4 * Math.PI, 0.4 * Math.PI);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(bx, by, r * 0.55, 0.6 * Math.PI, 1.4 * Math.PI);
+  ctx.stroke();
+}
+
+function drawParticles() {
+  for (var i = netParticles.length - 1; i >= 0; i--) {
+    var p = netParticles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.1;
+    p.life--;
+    if (p.life <= 0) { netParticles.splice(i, 1); continue; }
+    ctx.globalAlpha = p.life / 40;
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawAimLine() {
+  if (ball.active || !running) return;
+
+  // Dotted line from ball toward hoop
+  ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([8, 8]);
+  ctx.beginPath();
+  ctx.moveTo(ball.x, ball.y);
+  ctx.lineTo(hoop.x, hoop.y);
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+// ─── GAME LOOP ────────────────────────────────────
+function gameLoop() {
+  if (!running) return;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawDarkOverlay();
+
+  positionHoop();
+
+  // Update ball
+  if (ball.active) {
+    ball.vy += GRAVITY;
+    ball.x += ball.vx;
+    ball.y += ball.vy;
+
+    // Trail
+    trail.push({ x: ball.x, y: ball.y });
+    if (trail.length > 12) trail.shift();
+
+    // Check if ball passes through hoop
+    if (!ball.scored && !ball.missed) {
+      var rimLeft = hoop.x - hoop.w / 2 + 5;
+      var rimRight = hoop.x + hoop.w / 2 - 5;
+      var hoopY = hoop.y;
+
+      // Ball center is near hoop level and within rim
+      if (ball.y > hoopY - 5 && ball.y < hoopY + 20 && ball.vy > 0) {
+        if (ball.x > rimLeft && ball.x < rimRight) {
+          // SCORE!
+          ball.scored = true;
+          streak++;
+          if (streak > bestStreak) bestStreak = streak;
+          makes++;
+
+          var points = 2;
+          var label = '+2';
+          if (streak >= 5) { points = 5; label = '+5 FIRE!'; }
+          else if (streak >= 3) { points = 3; label = '+3 NICE!'; }
+
+          score += points;
+          scoreEl.textContent = score;
+          streakEl.textContent = streak >= 2 ? streak + ' in a row!' : '';
+
+          showScorePop(label, GOLD);
+          netBurst();
+          if (navigator.vibrate) navigator.vibrate(50);
+
+          // Reset ball after short delay
+          setTimeout(resetBall, 600);
+        }
+      }
+
+      // Rim bounce
+      var rimLeftX = hoop.x - hoop.w / 2;
+      var rimRightX = hoop.x + hoop.w / 2;
+      if (ball.y > hoopY - BALL_RADIUS && ball.y < hoopY + 15) {
+        // Left rim
+        var dLeft = Math.sqrt((ball.x - rimLeftX) * (ball.x - rimLeftX) + (ball.y - hoopY) * (ball.y - hoopY));
+        if (dLeft < BALL_RADIUS + 6) {
+          ball.vx = -Math.abs(ball.vx) - 1;
+          ball.vy *= 0.6;
+          ball.x = rimLeftX - BALL_RADIUS - 6;
+        }
+        // Right rim
+        var dRight = Math.sqrt((ball.x - rimRightX) * (ball.x - rimRightX) + (ball.y - hoopY) * (ball.y - hoopY));
+        if (dRight < BALL_RADIUS + 6) {
+          ball.vx = Math.abs(ball.vx) + 1;
+          ball.vy *= 0.6;
+          ball.x = rimRightX + BALL_RADIUS + 6;
+        }
+      }
+    }
+
+    // Ball off screen — miss
+    if (ball.y > canvas.height + 50 || ball.x < -50 || ball.x > canvas.width + 50) {
+      if (!ball.scored) {
+        streak = 0;
+        streakEl.textContent = '';
+        showScorePop('MISS', RED);
+      }
+      resetBall();
+    }
+  }
+
+  drawAimLine();
+  drawHoop();
+  drawBall();
+  drawParticles();
+
+  requestAnimationFrame(gameLoop);
+}
+
+// ─── START / END ──────────────────────────────────
+canvas.style.pointerEvents = 'none';
+
+function startGame() {
+  score = 0; streak = 0; bestStreak = 0; shots = 0; makes = 0;
+  timeLeft = GAME_DURATION;
+  netParticles = [];
+  scoreEl.textContent = '0';
+  streakEl.textContent = '';
+  timerEl.textContent = timeLeft;
+
+  positionHoop();
+  resetBall();
+
+  startScreen.classList.add('hidden');
+  endScreen.classList.add('hidden');
+  hud.classList.remove('hidden');
+  swipeHint.classList.remove('hidden');
+  canvas.style.pointerEvents = 'auto';
+  running = true;
+
+  // Hide swipe hint after first shot
+  var hintCheck = setInterval(function() {
+    if (shots > 0) {
+      swipeHint.classList.add('hidden');
+      clearInterval(hintCheck);
+    }
+  }, 500);
+
+  timerInterval = setInterval(function() {
+    timeLeft--;
+    timerEl.textContent = timeLeft;
+    if (timeLeft <= 0) endGame();
+  }, 1000);
+
+  requestAnimationFrame(gameLoop);
+}
+
+function endGame() {
+  running = false;
+  clearInterval(timerInterval);
+  canvas.style.pointerEvents = 'none';
+  hud.classList.add('hidden');
+  swipeHint.classList.add('hidden');
+
+  finalScoreEl.textContent = score;
+  var pct = shots > 0 ? Math.round((makes / shots) * 100) : 0;
+  statsEl.textContent = makes + '/' + shots + ' shots (' + pct + '%) | Best streak: ' + bestStreak;
+  endScreen.classList.remove('hidden');
+}
+
+document.getElementById('startBtn').addEventListener('click', function(e) { e.preventDefault(); startGame(); });
+document.getElementById('restartBtn').addEventListener('click', function(e) { e.preventDefault(); startGame(); });
+</script>
+
+</body>
+</html>
