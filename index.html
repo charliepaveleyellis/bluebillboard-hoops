@@ -249,10 +249,23 @@ var endScreen = document.getElementById('endScreen');
 var finalScoreEl = document.getElementById('finalScore');
 var statsEl = document.getElementById('statsDisplay');
 
-// ─── POSITION HOOP ───────────────────────────────
+// ─── HOOP MOVEMENT ───────────────────────────────
+var hoopDir = 1;
+var hoopSpeed = 0;
+var hoopBaseX = 0;
+
 function positionHoop() {
-  hoop.x = canvas.width / 2;
   hoop.y = canvas.height * 0.28;
+  hoopBaseX = canvas.width / 2;
+
+  // Hoop moves side to side — gets faster over time
+  var elapsed = GAME_DURATION - timeLeft;
+  hoopSpeed = 0.8 + (elapsed / GAME_DURATION) * 2.5; // 0.8 → 3.3
+  var margin = hoop.w / 2 + 20;
+
+  hoop.x += hoopDir * hoopSpeed;
+  if (hoop.x > canvas.width - margin) { hoop.x = canvas.width - margin; hoopDir = -1; }
+  if (hoop.x < margin) { hoop.x = margin; hoopDir = 1; }
 }
 
 // ─── RESET BALL ───────────────────────────────────
@@ -638,6 +651,8 @@ function startGame() {
   streakEl.textContent = '';
   timerEl.textContent = timeLeft;
 
+  hoop.x = canvas.width / 2;
+  hoopDir = 1;
   positionHoop();
   resetBall();
 
